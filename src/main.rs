@@ -1,6 +1,8 @@
 use minifb::{Key, Window, WindowOptions};
 use std::time::{Duration, Instant};
-
+use rodio::{Decoder, OutputStream, Sink, Source};
+use std::fs::File;
+use std::io::BufReader;
 mod framebuffer;
 mod map;
 
@@ -144,7 +146,30 @@ fn draw_text(framebuffer: &mut Framebuffer, x: usize, y: usize, text: &str, colo
         draw_digit(framebuffer, x + x_offset, y, index, color);
         x_offset += 6; // Espacio entre caracteres
     }
-}fn main() {
+}
+
+fn main() {
+    // Inicializa el sistema de audio
+    let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+    let sink = Sink::try_new(&stream_handle).unwrap();
+
+    // Cargar el archivo de música
+    let file = BufReader::new(File::open("src/music-_1_.wav").unwrap());
+
+    // Decodificar el archivo de música
+    let source = Decoder::new(file).unwrap();
+
+    // Hacer que la música se repita indefinidamente
+    sink.append(source.repeat_infinite());
+
+    // Establecer el volumen inicial
+    let mut volume = 0.1;
+    sink.set_volume(volume);
+
+    // Comienza a reproducir la música en segundo plano
+    sink.play();
+
+    // Inicialización del juego
     let map = initialize_map();
     let mut player = Player::new(12.0, 12.0, 0.0);
 
@@ -184,6 +209,16 @@ fn draw_text(framebuffer: &mut Framebuffer, x: usize, y: usize, text: &str, colo
         }
         if window.is_key_down(Key::D) || window.is_key_down(Key::Right) {
             player.turn_right(0.03); // Reduce la velocidad de rotación
+        }
+
+        // Control del volumen
+        if window.is_key_down(Key::Equal) { // Tecla "+"
+            volume = (volume + 0.001).min(4.0); // Aumenta el volumen hasta un máximo de 1.0
+            sink.set_volume(volume);
+        }
+        if window.is_key_down(Key::Minus) { // Tecla "-"
+            volume = (volume - 0.001).max(0.0); // Disminuye el volumen hasta un mínimo de 0.0
+            sink.set_volume(volume);
         }
 
         // Renderiza la escena 3D
