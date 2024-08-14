@@ -1,7 +1,7 @@
 pub struct Map {
     pub width: usize,
     pub height: usize,
-    pub grid: Vec<Vec<i32>>, // Matriz 2D donde cada valor representa un tipo de pared o espacio vacío
+    pub grid: Vec<Vec<i32>>, // 1 es pared, 0 es espacio vacío
 }
 
 impl Map {
