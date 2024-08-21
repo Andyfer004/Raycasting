@@ -151,23 +151,25 @@ fn draw_text(framebuffer: &mut Framebuffer, x: usize, y: usize, text: &str, colo
 fn main() {
     // Inicializa el sistema de audio
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-    let sink = Sink::try_new(&stream_handle).unwrap();
+
+    // Crear un Sink para la música de fondo
+    let music_sink = Sink::try_new(&stream_handle).unwrap();
 
     // Cargar el archivo de música
-    let file = BufReader::new(File::open("src/music-_1_.wav").unwrap());
+    let music_file = BufReader::new(File::open("src/music-_1_.wav").unwrap());
+    let music_source = Decoder::new(music_file).unwrap();
+    music_sink.append(music_source.repeat_infinite());
 
-    // Decodificar el archivo de música
-    let source = Decoder::new(file).unwrap();
-
-    // Hacer que la música se repita indefinidamente
-    sink.append(source.repeat_infinite());
+    // Crear un Sink separado para los sonidos de caminar
+    let walk_sink = Sink::try_new(&stream_handle).unwrap();
 
     // Establecer el volumen inicial
     let mut volume = 0.1;
-    sink.set_volume(volume);
+    music_sink.set_volume(volume);
+    walk_sink.set_volume(2.0);
 
     // Comienza a reproducir la música en segundo plano
-    sink.play();
+    music_sink.play();
 
     // Inicialización del juego
     let map = initialize_map();
@@ -192,6 +194,8 @@ fn main() {
     let mut frame_count = 0;
     let mut fps = 0;
 
+    let mut last_mouse_x = WIDTH as f32 / 2.0;
+
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let start_time = Instant::now();
 
@@ -199,49 +203,50 @@ fn main() {
 
         // Capturar entradas del teclado para mover al jugador
         if window.is_key_down(Key::W) || window.is_key_down(Key::Up) {
-            player.move_forward(0.05, &map); // Reduce la velocidad de movimiento
+            player.move_forward(0.05, &map, &walk_sink);
         }
         if window.is_key_down(Key::S) || window.is_key_down(Key::Down) {
-            player.move_backward(0.05, &map); // Reduce la velocidad de movimiento
+            player.move_backward(0.05, &map, &walk_sink);
         }
         if window.is_key_down(Key::A) || window.is_key_down(Key::Left) {
-            player.turn_left(0.03); // Reduce la velocidad de rotación
+            player.turn_left(0.03);
         }
         if window.is_key_down(Key::D) || window.is_key_down(Key::Right) {
-            player.turn_right(0.03); // Reduce la velocidad de rotación
+            player.turn_right(0.03);
         }
 
         // Control del volumen
-        if window.is_key_down(Key::Equal) { // Tecla "+"
-            volume = (volume + 0.001).min(4.0); // Aumenta el volumen hasta un máximo de 1.0
-            sink.set_volume(volume);
+        if window.is_key_down(Key::Equal) {
+            volume = (volume + 0.001).min(4.0);
+            music_sink.set_volume(volume);
         }
-        if window.is_key_down(Key::Minus) { // Tecla "-"
-            volume = (volume - 0.001).max(0.0); // Disminuye el volumen hasta un mínimo de 0.0
-            sink.set_volume(volume);
+        if window.is_key_down(Key::Minus) {
+            volume = (volume - 0.001).max(0.0);
+            music_sink.set_volume(volume);
+        }
+
+        // Rotación del jugador con el mouse
+        if let Some((mouse_x, _)) = window.get_mouse_pos(minifb::MouseMode::Pass) {
+            let mouse_delta = mouse_x - last_mouse_x;
+            player.turn_right(mouse_delta as f64 * 0.002);
+            last_mouse_x = mouse_x;
         }
 
         // Renderiza la escena 3D
         render_scene(&map, &player, &mut framebuffer);
-
-        // Dibujar el minimapa en la esquina superior izquierda
         draw_minimap(&map, &player, &mut framebuffer);
 
-        // Calcular FPS
         let current_time = Instant::now();
         frame_count += 1;
-
         if current_time.duration_since(last_time).as_secs_f64() >= 1.0 {
             fps = frame_count;
             last_time = current_time;
             frame_count = 0;
         }
 
-        // Dibujar FPS en la esquina superior derecha con la palabra "FPS"
         let width = framebuffer.width;
         draw_text(&mut framebuffer, width - 70, 10, &format!("{}FPS", fps), 0xFFFFFF);
 
-        // Actualiza el búfer de pantalla con el contenido del framebuffer
         let mut display_buffer = vec![COLOR_FONDO; window_width * window_height];
         for y in 0..HEIGHT {
             for x in 0..WIDTH {
@@ -251,11 +256,8 @@ fn main() {
             }
         }
 
-        window
-            .update_with_buffer(&display_buffer, window_width, window_height)
-            .unwrap();
+        window.update_with_buffer(&display_buffer, window_width, window_height).unwrap();
 
-        // Control estricto del tiempo para mantener los FPS
         let elapsed_time = start_time.elapsed();
         if frame_duration > elapsed_time {
             std::thread::sleep(frame_duration - elapsed_time);
