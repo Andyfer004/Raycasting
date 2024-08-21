@@ -17,40 +17,33 @@ use raycaster::cast_ray;
 
 const WIDTH: usize = 640;  // Ancho de la ventana (en píxeles)
 const HEIGHT: usize = 480; // Altura de la ventana (en píxeles)
-const CELL_SIZE: usize = 1; // Tamaño de cada celda (en píxeles)
-
 const COLOR_FONDO: u32 = 0x000000;
 const COLOR_PARED: u32 = 0xFFFFFF;
 
-
+enum GameState {
+    WelcomeScreen,
+    Playing,
+}
 
 fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer) {
     for x in 0..framebuffer.width {
-        // Calcular el ángulo del rayo para esta columna de la pantalla
         let camera_x = 2.0 * (x as f64) / (framebuffer.width as f64) - 1.0;
         let angle_offset = player.fov / 2.0 * camera_x;
 
-        // Lanzar el rayo y obtener la distancia a la pared
         let (perp_wall_dist, is_horizontal) = cast_ray(map, player, angle_offset);
 
-        // Calcular la altura de la pared en la pantalla
         let mut wall_height = (framebuffer.height as f64 / perp_wall_dist) as usize;
-        
-        // Limitar la altura máxima de la pared
         wall_height = wall_height.min(framebuffer.height);
 
         let start = (framebuffer.height / 2).saturating_sub(wall_height / 2);
         let end = (framebuffer.height / 2) + wall_height / 2;
 
-        // Dibujar la pared en la pantalla
-        let color = if is_horizontal { 0xCCCCCC } else { 0xAAAAAA }; // Diferente color para paredes horizontales y verticales
+        let color = if is_horizontal { 0xCCCCCC } else { 0xAAAAAA };
         for y in start..end {
             framebuffer.point(x, y, color);
         }
     }
 }
-
-
 
 fn draw_2d_map(map: &Map, framebuffer: &mut Framebuffer) {
     let cell_width = framebuffer.width / map.width;
@@ -74,15 +67,14 @@ fn draw_2d_map(map: &Map, framebuffer: &mut Framebuffer) {
 }
 
 fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer) {
-    let minimap_scale = 4; // Escala del minimapa
-    let minimap_size = map.width * minimap_scale;
+    let minimap_scale = 4;
 
     for y in 0..map.height {
         for x in 0..map.width {
             let color = if map.is_wall(x as f64, y as f64) {
-                0xFFFFFF // Color de las paredes en el minimapa
+                0xFFFFFF
             } else {
-                0x000000 // Color del suelo en el minimapa
+                0x000000
             };
 
             for py in 0..minimap_scale {
@@ -93,17 +85,16 @@ fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer) {
         }
     }
 
-    // Dibujar la posición del jugador en el minimapa
     let player_x = (player.x * minimap_scale as f64) as usize;
     let player_y = (player.y * minimap_scale as f64) as usize;
     for py in 0..minimap_scale {
         for px in 0..minimap_scale {
-            framebuffer.point(player_x + px, player_y + py, 0xFF0000); // Rojo para la posición del jugador
+            framebuffer.point(player_x + px, player_y + py, 0xFF0000);
         }
     }
 }
 
-const FONT: [[u8; 5]; 13] = [
+const FONT: [[u8; 5]; 20] = [
     [0b01110, 0b10001, 0b10001, 0b10001, 0b01110], // 0
     [0b00100, 0b01100, 0b00100, 0b00100, 0b01110], // 1
     [0b01110, 0b10001, 0b00110, 0b01000, 0b11111], // 2
@@ -117,61 +108,87 @@ const FONT: [[u8; 5]; 13] = [
     [0b11111, 0b10000, 0b11110, 0b10000, 0b10000], // F
     [0b11110, 0b10001, 0b11110, 0b10000, 0b10000], // P
     [0b01111, 0b10000, 0b01110, 0b00001, 0b11110], // S
+    [0b10001, 0b10101, 0b10101, 0b10101, 0b01010], // W
+    [0b11111, 0b10000, 0b11110, 0b10000, 0b11111], // E
+    [0b01110, 0b10000, 0b10000, 0b10000, 0b01110], // L
+    [0b01110, 0b10001, 0b10001, 0b10001, 0b01110], // O
+    [0b11111, 0b10101, 0b10101, 0b10101, 0b10101], // M
+    [0b10001, 0b11001, 0b10101, 0b10011, 0b10001], // N
+    [0b11111, 0b10001, 0b10001, 0b10001, 0b10001], // C
 ];
 
-fn draw_digit(framebuffer: &mut Framebuffer, x: usize, y: usize, index: usize, color: u32) {
+
+fn draw_digit(framebuffer: &mut Framebuffer, x: usize, y: usize, index: usize, color: u32, scale: usize) {
     if index >= FONT.len() { return; }
 
     for (row, byte) in FONT[index].iter().enumerate() {
         for col in 0..5 {
             if byte & (1 << (4 - col)) != 0 {
-                framebuffer.point(x + col, y + row, color);
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        framebuffer.point(x + col * scale + sx, y + row * scale + sy, color);
+                    }
+                }
             }
         }
     }
 }
 
-fn draw_text(framebuffer: &mut Framebuffer, x: usize, y: usize, text: &str, color: u32) {
+fn draw_text(framebuffer: &mut Framebuffer, x: usize, y: usize, text: &str, color: u32, scale: usize) {
     let mut x_offset = 0;
-
     for ch in text.chars() {
         let index = match ch {
             '0'..='9' => ch as usize - '0' as usize,
             'F' => 10,
             'P' => 11,
             'S' => 12,
+            'W' => 13,
+            'E' => 14,
+            'L' => 15,
+            'O' => 16,
+            'M' => 17,
+            'N' => 18,
+            'C' => 19,  // Nueva posición para la C
             _ => continue,
         };
-
-        draw_digit(framebuffer, x + x_offset, y, index, color);
-        x_offset += 6; // Espacio entre caracteres
+        draw_digit(framebuffer, x + x_offset, y, index, color, scale);
+        x_offset += 6 * scale;
     }
 }
 
+
+fn draw_centered_text(framebuffer: &mut Framebuffer, text: &str, color: u32, scale: usize) {
+    let char_width = 6 * scale;
+    let char_height = 5 * scale;
+    let text_width = text.len() * char_width;
+    let text_height = char_height;
+
+    let x_start = (WIDTH - text_width) / 2;
+    let y_start = (HEIGHT - text_height) / 2;
+
+    draw_text(framebuffer, x_start, y_start, text, color, scale);
+}
+
+fn draw_fps(framebuffer: &mut Framebuffer, fps: usize) {
+    draw_text(framebuffer, WIDTH - 70, 10, &format!("{}FPS", fps), 0xFFFFFF, 1);
+}
+
 fn main() {
-    // Inicializa el sistema de audio
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
-    // Crear un Sink para la música de fondo
     let music_sink = Sink::try_new(&stream_handle).unwrap();
-
-    // Cargar el archivo de música
     let music_file = BufReader::new(File::open("src/music-_1_.wav").unwrap());
     let music_source = Decoder::new(music_file).unwrap();
     music_sink.append(music_source.repeat_infinite());
 
-    // Crear un Sink separado para los sonidos de caminar
     let walk_sink = Sink::try_new(&stream_handle).unwrap();
 
-    // Establecer el volumen inicial
     let mut volume = 0.1;
     music_sink.set_volume(volume);
     walk_sink.set_volume(2.0);
 
-    // Comienza a reproducir la música en segundo plano
     music_sink.play();
 
-    // Inicialización del juego
     let map = initialize_map();
     let mut player = Player::new(12.0, 12.0, 0.0);
 
@@ -183,84 +200,94 @@ fn main() {
 
     let mut framebuffer = Framebuffer::new(WIDTH, HEIGHT);
     let mut window = Window::new(
-        "3D Raycaster",
+        "3D Raycaster  Press Enter to start",
         window_width,
         window_height,
         WindowOptions::default(),
     )
     .unwrap();
 
+    let mut last_mouse_x = WIDTH as f32 / 2.0;
+    let mut game_state = GameState::WelcomeScreen;
+
     let mut last_time = Instant::now();
     let mut frame_count = 0;
     let mut fps = 0;
 
-    let mut last_mouse_x = WIDTH as f32 / 2.0;
-
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        let start_time = Instant::now();
+        match game_state {
+            GameState::WelcomeScreen => {
+                framebuffer.buffer.fill(COLOR_FONDO);
+                draw_centered_text(&mut framebuffer, "WECLOME", 0xFFFFFF, 3);
+                window.update_with_buffer(&framebuffer.buffer, WIDTH, HEIGHT).unwrap();
 
-        framebuffer.buffer.fill(COLOR_FONDO);
-
-        // Capturar entradas del teclado para mover al jugador
-        if window.is_key_down(Key::W) || window.is_key_down(Key::Up) {
-            player.move_forward(0.05, &map, &walk_sink);
-        }
-        if window.is_key_down(Key::S) || window.is_key_down(Key::Down) {
-            player.move_backward(0.05, &map, &walk_sink);
-        }
-        if window.is_key_down(Key::A) || window.is_key_down(Key::Left) {
-            player.turn_left(0.03);
-        }
-        if window.is_key_down(Key::D) || window.is_key_down(Key::Right) {
-            player.turn_right(0.03);
-        }
-
-        // Control del volumen
-        if window.is_key_down(Key::Equal) {
-            volume = (volume + 0.001).min(4.0);
-            music_sink.set_volume(volume);
-        }
-        if window.is_key_down(Key::Minus) {
-            volume = (volume - 0.001).max(0.0);
-            music_sink.set_volume(volume);
-        }
-
-        // Rotación del jugador con el mouse
-        if let Some((mouse_x, _)) = window.get_mouse_pos(minifb::MouseMode::Pass) {
-            let mouse_delta = mouse_x - last_mouse_x;
-            player.turn_right(mouse_delta as f64 * 0.002);
-            last_mouse_x = mouse_x;
-        }
-
-        // Renderiza la escena 3D
-        render_scene(&map, &player, &mut framebuffer);
-        draw_minimap(&map, &player, &mut framebuffer);
-
-        let current_time = Instant::now();
-        frame_count += 1;
-        if current_time.duration_since(last_time).as_secs_f64() >= 1.0 {
-            fps = frame_count;
-            last_time = current_time;
-            frame_count = 0;
-        }
-
-        let width = framebuffer.width;
-        draw_text(&mut framebuffer, width - 70, 10, &format!("{}FPS", fps), 0xFFFFFF);
-
-        let mut display_buffer = vec![COLOR_FONDO; window_width * window_height];
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                if framebuffer.is_point_set(x, y) {
-                    display_buffer[y * window_width + x] = framebuffer.buffer[y * WIDTH + x];
+                if window.is_key_down(Key::Enter) {
+                    game_state = GameState::Playing;
+                    last_time = Instant::now();  // Reiniciar el tiempo para el cálculo de FPS
+                    frame_count = 0;
                 }
             }
-        }
+            GameState::Playing => {
+                let start_time = Instant::now();
+                framebuffer.buffer.fill(COLOR_FONDO);
 
-        window.update_with_buffer(&display_buffer, window_width, window_height).unwrap();
+                if window.is_key_down(Key::W) || window.is_key_down(Key::Up) {
+                    player.move_forward(0.05, &map, &walk_sink);
+                }
+                if window.is_key_down(Key::S) || window.is_key_down(Key::Down) {
+                    player.move_backward(0.05, &map, &walk_sink);
+                }
+                if window.is_key_down(Key::A) || window.is_key_down(Key::Left) {
+                    player.turn_left(0.03);
+                }
+                if window.is_key_down(Key::D) || window.is_key_down(Key::Right) {
+                    player.turn_right(0.03);
+                }
 
-        let elapsed_time = start_time.elapsed();
-        if frame_duration > elapsed_time {
-            std::thread::sleep(frame_duration - elapsed_time);
+                if window.is_key_down(Key::Equal) {
+                    volume = (volume + 0.001).min(4.0);
+                    music_sink.set_volume(volume);
+                }
+                if window.is_key_down(Key::Minus) {
+                    volume = (volume - 0.001).max(0.0);
+                    music_sink.set_volume(volume);
+                }
+
+                if let Some((mouse_x, _)) = window.get_mouse_pos(minifb::MouseMode::Pass) {
+                    let mouse_delta = mouse_x - last_mouse_x;
+                    player.turn_right(mouse_delta as f64 * 0.002);
+                    last_mouse_x = mouse_x;
+                }
+
+                render_scene(&map, &player, &mut framebuffer);
+                draw_minimap(&map, &player, &mut framebuffer);
+
+                frame_count += 1;
+                let current_time = Instant::now();
+                if current_time.duration_since(last_time).as_secs_f64() >= 1.0 {
+                    fps = frame_count;
+                    last_time = current_time;
+                    frame_count = 0;
+                }
+
+                draw_fps(&mut framebuffer, fps);
+
+                let mut display_buffer = vec![COLOR_FONDO; window_width * window_height];
+                for y in 0..HEIGHT {
+                    for x in 0..WIDTH {
+                        if framebuffer.is_point_set(x, y) {
+                            display_buffer[y * window_width + x] = framebuffer.buffer[y * WIDTH + x];
+                        }
+                    }
+                }
+
+                window.update_with_buffer(&display_buffer, window_width, window_height).unwrap();
+
+                let elapsed_time = start_time.elapsed();
+                if frame_duration > elapsed_time {
+                    std::thread::sleep(frame_duration - elapsed_time);
+                }
+            }
         }
     }
 }
