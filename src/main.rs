@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::fs::File;
 use std::io::BufReader;
+use rand::Rng;
+
 mod framebuffer;
 mod map;
 
@@ -15,14 +17,21 @@ use player::Player;
 mod raycaster;
 use raycaster::cast_ray;
 
-const WIDTH: usize = 640;  // Ancho de la ventana (en píxeles)
-const HEIGHT: usize = 480; // Altura de la ventana (en píxeles)
+const WIDTH: usize = 640;
+const HEIGHT: usize = 480;
 const COLOR_FONDO: u32 = 0x000000;
 const COLOR_PARED: u32 = 0xFFFFFF;
 
 enum GameState {
     WelcomeScreen,
     Playing,
+    WinScreen,
+}
+
+struct Item {
+    x: f64,
+    y: f64,
+    collected: bool,
 }
 
 fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer) {
@@ -66,7 +75,7 @@ fn draw_2d_map(map: &Map, framebuffer: &mut Framebuffer) {
     }
 }
 
-fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer) {
+fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer, key: &Item, goal: &Item) {
     let minimap_scale = 4;
 
     for y in 0..map.height {
@@ -92,9 +101,27 @@ fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer) {
             framebuffer.point(player_x + px, player_y + py, 0xFF0000);
         }
     }
+
+    if !key.collected {
+        let key_x = (key.x * minimap_scale as f64) as usize;
+        let key_y = (key.y * minimap_scale as f64) as usize;
+        for py in 0..minimap_scale {
+            for px in 0..minimap_scale {
+                framebuffer.point(key_x + px, key_y + py, 0xFFFF00); // Amarillo para la llave
+            }
+        }
+    }
+
+    let goal_x = (goal.x * minimap_scale as f64) as usize;
+    let goal_y = (goal.y * minimap_scale as f64) as usize;
+    for py in 0..minimap_scale {
+        for px in 0..minimap_scale {
+            framebuffer.point(goal_x + px, goal_y + py, 0x00FF00); // Verde para la meta
+        }
+    }
 }
 
-const FONT: [[u8; 5]; 20] = [
+const FONT: [[u8; 5]; 21] = [
     [0b01110, 0b10001, 0b10001, 0b10001, 0b01110], // 0
     [0b00100, 0b01100, 0b00100, 0b00100, 0b01110], // 1
     [0b01110, 0b10001, 0b00110, 0b01000, 0b11111], // 2
@@ -108,15 +135,15 @@ const FONT: [[u8; 5]; 20] = [
     [0b11111, 0b10000, 0b11110, 0b10000, 0b10000], // F
     [0b11110, 0b10001, 0b11110, 0b10000, 0b10000], // P
     [0b01111, 0b10000, 0b01110, 0b00001, 0b11110], // S
-    [0b10001, 0b10101, 0b10101, 0b10101, 0b01010], // W
-    [0b11111, 0b10000, 0b11110, 0b10000, 0b11111], // E
-    [0b01110, 0b10000, 0b10000, 0b10000, 0b01110], // L
+    [0b10001, 0b10001, 0b10101, 0b10101, 0b01010], // W
+    [0b01110, 0b10000, 0b11110, 0b10000, 0b01110], // E
+    [0b10000, 0b10000, 0b10000, 0b10000, 0b11110], // L
     [0b01110, 0b10001, 0b10001, 0b10001, 0b01110], // O
-    [0b11111, 0b10101, 0b10101, 0b10101, 0b10101], // M
+    [0b11110, 0b10001, 0b10001, 0b10001, 0b10001], // M
     [0b10001, 0b11001, 0b10101, 0b10011, 0b10001], // N
-    [0b11111, 0b10001, 0b10001, 0b10001, 0b10001], // C
+    [0b01010, 0b11111, 0b10001, 0b10001, 0b10001], // C
+    [0b11111, 0b00100, 0b00100, 0b00100, 0b11111], //I
 ];
-
 
 fn draw_digit(framebuffer: &mut Framebuffer, x: usize, y: usize, index: usize, color: u32, scale: usize) {
     if index >= FONT.len() { return; }
@@ -148,14 +175,14 @@ fn draw_text(framebuffer: &mut Framebuffer, x: usize, y: usize, text: &str, colo
             'O' => 16,
             'M' => 17,
             'N' => 18,
-            'C' => 19,  // Nueva posición para la C
+            'C' => 19,
+            'I' => 20,
             _ => continue,
         };
         draw_digit(framebuffer, x + x_offset, y, index, color, scale);
         x_offset += 6 * scale;
     }
 }
-
 
 fn draw_centered_text(framebuffer: &mut Framebuffer, text: &str, color: u32, scale: usize) {
     let char_width = 6 * scale;
@@ -172,6 +199,29 @@ fn draw_centered_text(framebuffer: &mut Framebuffer, text: &str, color: u32, sca
 fn draw_fps(framebuffer: &mut Framebuffer, fps: usize) {
     draw_text(framebuffer, WIDTH - 70, 10, &format!("{}FPS", fps), 0xFFFFFF, 1);
 }
+
+fn generate_random_position(map: &Map) -> (f64, f64) {
+    let mut rng = rand::thread_rng();
+    let mut x;
+    let mut y;
+    
+    // Ajustamos los límites para asegurarnos de que no se generen fuera del mapa
+    let min_limit = 1;
+    let max_x_limit = map.width - 20;  // Ajustamos para evitar bordes
+    let max_y_limit = map.height - 20; // Ajustamos para evitar bordes
+    
+    loop {
+        x = rng.gen_range(min_limit..=max_x_limit) as f64;
+        y = rng.gen_range(min_limit..=max_y_limit) as f64;
+        
+        if !map.is_wall(x, y) {
+            break;
+        }
+    }
+
+    (x, y)
+}
+
 
 fn main() {
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
@@ -200,7 +250,7 @@ fn main() {
 
     let mut framebuffer = Framebuffer::new(WIDTH, HEIGHT);
     let mut window = Window::new(
-        "3D Raycaster  Press Enter to start",
+        "3D Raycaster",
         window_width,
         window_height,
         WindowOptions::default(),
@@ -214,11 +264,19 @@ fn main() {
     let mut frame_count = 0;
     let mut fps = 0;
 
+    // Generar llave y meta en posiciones válidas dentro del mapa
+    let (key_x, key_y) = generate_random_position(&map);
+    let (goal_x, goal_y) = generate_random_position(&map);
+
+    let mut key = Item { x: key_x, y: key_y, collected: false };
+    let mut goal = Item { x: goal_x, y: goal_y, collected: false };
+
     while window.is_open() && !window.is_key_down(Key::Escape) {
         match game_state {
             GameState::WelcomeScreen => {
                 framebuffer.buffer.fill(COLOR_FONDO);
-                draw_centered_text(&mut framebuffer, "WECLOME", 0xFFFFFF, 3);
+                draw_centered_text(&mut framebuffer, "WELCOCE", 0xFFFFFF, 3);
+                draw_centered_text(&mut framebuffer, "", 0xFFFFFF, 2);
                 window.update_with_buffer(&framebuffer.buffer, WIDTH, HEIGHT).unwrap();
 
                 if window.is_key_down(Key::Enter) {
@@ -259,8 +317,18 @@ fn main() {
                     last_mouse_x = mouse_x;
                 }
 
+                // Comprobar si el jugador ha recogido la llave
+                if (player.x - key.x).abs() < 0.5 && (player.y - key.y).abs() < 0.5 {
+                    key.collected = true;
+                }
+
+                // Comprobar si el jugador ha llegado a la meta después de recoger la llave
+                if key.collected && (player.x - goal.x).abs() < 0.5 && (player.y - goal.y).abs() < 0.5 {
+                    game_state = GameState::WinScreen;
+                }
+
                 render_scene(&map, &player, &mut framebuffer);
-                draw_minimap(&map, &player, &mut framebuffer);
+                draw_minimap(&map, &player, &mut framebuffer, &key, &goal);
 
                 frame_count += 1;
                 let current_time = Instant::now();
@@ -287,6 +355,11 @@ fn main() {
                 if frame_duration > elapsed_time {
                     std::thread::sleep(frame_duration - elapsed_time);
                 }
+            }
+            GameState::WinScreen => {
+                framebuffer.buffer.fill(COLOR_FONDO);
+                draw_centered_text(&mut framebuffer, "WIN", 0x00FF00, 4);
+                window.update_with_buffer(&framebuffer.buffer, WIDTH, HEIGHT).unwrap();
             }
         }
     }
