@@ -4,6 +4,7 @@ use rodio::{Decoder, OutputStream, Sink, Source};
 use std::fs::File;
 use std::io::BufReader;
 use rand::Rng;
+use image::GenericImageView;
 
 mod framebuffer;
 mod map;
@@ -19,8 +20,8 @@ use raycaster::cast_ray;
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 480;
-const COLOR_FONDO: u32 = 0x000000;
-const COLOR_PARED: u32 = 0xFFFFFF;
+const COLOR_CIELO: u32 = 0x87CEEB; // Celeste
+const COLOR_SUELO: u32 = 0x8B4513; // Café
 
 enum GameState {
     WelcomeScreen,
@@ -32,93 +33,6 @@ struct Item {
     x: f64,
     y: f64,
     collected: bool,
-}
-
-fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer) {
-    for x in 0..framebuffer.width {
-        let camera_x = 2.0 * (x as f64) / (framebuffer.width as f64) - 1.0;
-        let angle_offset = player.fov / 2.0 * camera_x;
-
-        let (perp_wall_dist, is_horizontal) = cast_ray(map, player, angle_offset);
-
-        let mut wall_height = (framebuffer.height as f64 / perp_wall_dist) as usize;
-        wall_height = wall_height.min(framebuffer.height);
-
-        let start = (framebuffer.height / 2).saturating_sub(wall_height / 2);
-        let end = (framebuffer.height / 2) + wall_height / 2;
-
-        let color = if is_horizontal { 0xCCCCCC } else { 0xAAAAAA };
-        for y in start..end {
-            framebuffer.point(x, y, color);
-        }
-    }
-}
-
-fn draw_2d_map(map: &Map, framebuffer: &mut Framebuffer) {
-    let cell_width = framebuffer.width / map.width;
-    let cell_height = framebuffer.height / map.height;
-
-    for y in 0..map.height {
-        for x in 0..map.width {
-            let color = if map.is_wall(x as f64, y as f64) {
-                COLOR_PARED
-            } else {
-                COLOR_FONDO
-            };
-
-            for py in 0..cell_height {
-                for px in 0..cell_width {
-                    framebuffer.point(x * cell_width + px, y * cell_height + py, color);
-                }
-            }
-        }
-    }
-}
-
-fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer, key: &Item, goal: &Item) {
-    let minimap_scale = 4;
-
-    for y in 0..map.height {
-        for x in 0..map.width {
-            let color = if map.is_wall(x as f64, y as f64) {
-                0xFFFFFF
-            } else {
-                0x000000
-            };
-
-            for py in 0..minimap_scale {
-                for px in 0..minimap_scale {
-                    framebuffer.point(x * minimap_scale + px, y * minimap_scale + py, color);
-                }
-            }
-        }
-    }
-
-    let player_x = (player.x * minimap_scale as f64) as usize;
-    let player_y = (player.y * minimap_scale as f64) as usize;
-    for py in 0..minimap_scale {
-        for px in 0..minimap_scale {
-            framebuffer.point(player_x + px, player_y + py, 0xFF0000);
-        }
-    }
-
-    if !key.collected {
-        let key_x = (key.x * minimap_scale as f64) as usize;
-        let key_y = (key.y * minimap_scale as f64) as usize;
-        for py in 0..minimap_scale {
-            for px in 0..minimap_scale {
-                framebuffer.point(key_x + px, key_y + py, 0xFFFF00); // Amarillo para la llave
-            }
-        }
-    }
-
-    let goal_x = (goal.x * minimap_scale as f64) as usize;
-    let goal_y = (goal.y * minimap_scale as f64) as usize;
-    for py in 0..minimap_scale {
-        for px in 0..minimap_scale {
-            framebuffer.point(goal_x + px, goal_y + py, 0x00FF00); // Verde para la meta
-        }
-    }
 }
 
 const FONT: [[u8; 5]; 21] = [
@@ -142,7 +56,7 @@ const FONT: [[u8; 5]; 21] = [
     [0b11110, 0b10001, 0b10001, 0b10001, 0b10001], // M
     [0b10001, 0b11001, 0b10101, 0b10011, 0b10001], // N
     [0b01010, 0b11111, 0b10001, 0b10001, 0b10001], // C
-    [0b11111, 0b00100, 0b00100, 0b00100, 0b11111], //I
+    [0b11111, 0b00100, 0b00100, 0b00100, 0b11111], // I
 ];
 
 fn draw_digit(framebuffer: &mut Framebuffer, x: usize, y: usize, index: usize, color: u32, scale: usize) {
@@ -200,20 +114,108 @@ fn draw_fps(framebuffer: &mut Framebuffer, fps: usize) {
     draw_text(framebuffer, WIDTH - 70, 10, &format!("{}FPS", fps), 0xFFFFFF, 1);
 }
 
+fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_texture: &image::DynamicImage) {
+    let texture_width = wall_texture.width() as usize;
+    let texture_height = wall_texture.height() as usize;
+
+    for x in 0..framebuffer.width {
+        let camera_x = 2.0 * (x as f64) / (framebuffer.width as f64) - 1.0;
+        let angle_offset = player.fov / 2.0 * camera_x;
+
+        // Obtener la distancia perpendicular y si la intersección es horizontal o vertical
+        let (perp_wall_dist, is_horizontal) = cast_ray(map, player, angle_offset);
+
+        if perp_wall_dist > 0.0 {
+            let wall_height = (framebuffer.height as f64 / perp_wall_dist) as usize;
+            let wall_height = wall_height.min(framebuffer.height);
+
+            let start = (framebuffer.height / 2).saturating_sub(wall_height / 2);
+            let end = (framebuffer.height / 2).saturating_add(wall_height / 2);
+
+            // Renderizar cielo y suelo antes de la pared
+            for y in 0..start {
+                framebuffer.point(x, y, COLOR_CIELO);
+            }
+            for y in end..framebuffer.height {
+                framebuffer.point(x, y, COLOR_SUELO);
+            }
+
+            // Renderizar la textura correctamente
+            let mut wall_x = if is_horizontal {
+                player.x + perp_wall_dist * player.direction.cos()
+            } else {
+                player.y + perp_wall_dist * player.direction.sin()
+            };
+            wall_x -= wall_x.floor();
+            let tex_x = (wall_x * texture_width as f64) as usize;
+
+            for y in start..end {
+                let tex_y = (((y - start) * texture_height) / wall_height) % texture_height;
+                let pixel = wall_texture.get_pixel(tex_x as u32, tex_y as u32);
+                let color = ((pixel[0] as u32) << 16) | ((pixel[1] as u32) << 8) | (pixel[2] as u32);
+                framebuffer.point(x, y, color);
+            }
+        }
+    }
+}
+
+
+
+fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer, key: &Item, goal: &Item) {
+    let minimap_scale = 4;
+
+    for y in 0..map.height {
+        for x in 0..map.width {
+            let color = if map.is_wall(x as f64, y as f64) {
+                0xFFFFFF
+            } else {
+                0x000000
+            };
+
+            for py in 0..minimap_scale {
+                for px in 0..minimap_scale {
+                    framebuffer.point(x * minimap_scale + px, y * minimap_scale + py, color);
+                }
+            }
+        }
+    }
+
+    let player_x = (player.x * minimap_scale as f64) as usize;
+    let player_y = (player.y * minimap_scale as f64) as usize;
+    for py in 0..minimap_scale {
+        for px in 0..minimap_scale {
+            framebuffer.point(player_x + px, player_y + py, 0xFF0000);
+        }
+    }
+
+    if !key.collected {
+        let key_x = (key.x * minimap_scale as f64) as usize;
+        let key_y = (key.y * minimap_scale as f64) as usize;
+        for py in 0..minimap_scale {
+            for px in 0..minimap_scale {
+                framebuffer.point(key_x + px, key_y + py, 0xFFFF00);
+            }
+        }
+    }
+
+    let goal_x = (goal.x * minimap_scale as f64) as usize;
+    let goal_y = (goal.y * minimap_scale as f64) as usize;
+    for py in 0..minimap_scale {
+        for px in 0..minimap_scale {
+            framebuffer.point(goal_x + px, goal_y + py, 0x00FF00);
+        }
+    }
+}
+
 fn generate_random_position(map: &Map) -> (f64, f64) {
     let mut rng = rand::thread_rng();
     let mut x;
     let mut y;
-    
-    // Ajustamos los límites para asegurarnos de que no se generen fuera del mapa
-    let min_limit = 1;
-    let max_x_limit = map.width - 20;  // Ajustamos para evitar bordes
-    let max_y_limit = map.height - 20; // Ajustamos para evitar bordes
-    
+
     loop {
-        x = rng.gen_range(min_limit..=max_x_limit) as f64;
-        y = rng.gen_range(min_limit..=max_y_limit) as f64;
-        
+        x = rng.gen_range(1..(map.width - 1)) as f64;
+        y = rng.gen_range(1..(map.height - 1)) as f64;
+
         if !map.is_wall(x, y) {
             break;
         }
@@ -222,25 +224,26 @@ fn generate_random_position(map: &Map) -> (f64, f64) {
     (x, y)
 }
 
-
 fn main() {
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
     let music_sink = Sink::try_new(&stream_handle).unwrap();
-    let music_file = BufReader::new(File::open("src/music-_1_.wav").unwrap());
+    let music_file = BufReader::new(File::open("src/musicanaruto.wav").unwrap());
     let music_source = Decoder::new(music_file).unwrap();
     music_sink.append(music_source.repeat_infinite());
 
     let walk_sink = Sink::try_new(&stream_handle).unwrap();
 
-    let mut volume = 0.1;
+    let mut volume = 0.0;
     music_sink.set_volume(volume);
-    walk_sink.set_volume(2.0);
+    walk_sink.set_volume(0.0);
 
     music_sink.play();
 
     let map = initialize_map();
     let mut player = Player::new(12.0, 12.0, 0.0);
+
+    let wall_texture = image::open("src/wall_texture.png").expect("Failed to load wall texture");
 
     let window_width = WIDTH;
     let window_height = HEIGHT;
@@ -264,7 +267,6 @@ fn main() {
     let mut frame_count = 0;
     let mut fps = 0;
 
-    // Generar llave y meta en posiciones válidas dentro del mapa
     let (key_x, key_y) = generate_random_position(&map);
     let (goal_x, goal_y) = generate_random_position(&map);
 
@@ -274,19 +276,21 @@ fn main() {
     while window.is_open() && !window.is_key_down(Key::Escape) {
         match game_state {
             GameState::WelcomeScreen => {
+                const COLOR_FONDO: u32 = 0x000000;
                 framebuffer.buffer.fill(COLOR_FONDO);
-                draw_centered_text(&mut framebuffer, "WELCOCE", 0xFFFFFF, 3);
-                draw_centered_text(&mut framebuffer, "", 0xFFFFFF, 2);
+                draw_centered_text(&mut framebuffer, "WELCOME", 0xFFFFFF, 3);
+                draw_centered_text(&mut framebuffer, "Press ENTER to start", 0xFFFFFF, 2);
                 window.update_with_buffer(&framebuffer.buffer, WIDTH, HEIGHT).unwrap();
 
                 if window.is_key_down(Key::Enter) {
                     game_state = GameState::Playing;
-                    last_time = Instant::now();  // Reiniciar el tiempo para el cálculo de FPS
+                    last_time = Instant::now();
                     frame_count = 0;
                 }
             }
             GameState::Playing => {
                 let start_time = Instant::now();
+                const COLOR_FONDO: u32 =  0x000000;
                 framebuffer.buffer.fill(COLOR_FONDO);
 
                 if window.is_key_down(Key::W) || window.is_key_down(Key::Up) {
@@ -317,17 +321,15 @@ fn main() {
                     last_mouse_x = mouse_x;
                 }
 
-                // Comprobar si el jugador ha recogido la llave
                 if (player.x - key.x).abs() < 0.5 && (player.y - key.y).abs() < 0.5 {
                     key.collected = true;
                 }
 
-                // Comprobar si el jugador ha llegado a la meta después de recoger la llave
                 if key.collected && (player.x - goal.x).abs() < 0.5 && (player.y - goal.y).abs() < 0.5 {
                     game_state = GameState::WinScreen;
                 }
 
-                render_scene(&map, &player, &mut framebuffer);
+                render_scene(&map, &player, &mut framebuffer, &wall_texture);
                 draw_minimap(&map, &player, &mut framebuffer, &key, &goal);
 
                 frame_count += 1;
@@ -357,6 +359,7 @@ fn main() {
                 }
             }
             GameState::WinScreen => {
+                const COLOR_FONDO: u32 =  0x000000;
                 framebuffer.buffer.fill(COLOR_FONDO);
                 draw_centered_text(&mut framebuffer, "WIN", 0x00FF00, 4);
                 window.update_with_buffer(&framebuffer.buffer, WIDTH, HEIGHT).unwrap();

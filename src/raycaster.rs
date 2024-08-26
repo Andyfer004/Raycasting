@@ -62,10 +62,11 @@ pub fn cast_ray(map: &Map, player: &Player, angle_offset: f64) -> (f64, bool) {
 
     // Calcular distancia perpendicular a la pared para evitar distorsión
     let perp_wall_dist = if side == 0 {
-        (map_x as f64 - player.x + (1 - step_x) as f64 / 2.0) / ray_dir_x
+        (map_x as f64 - player.x + (1 - step_x) as f64 / 2.0) / ray_dir_x.abs()
     } else {
-        (map_y as f64 - player.y + (1 - step_y) as f64 / 2.0) / ray_dir_y
+        (map_y as f64 - player.y + (1 - step_y) as f64 / 2.0) / ray_dir_y.abs()
     };
+    
 
     (perp_wall_dist, side == 1)
 }
