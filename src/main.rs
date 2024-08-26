@@ -234,9 +234,9 @@ fn main() {
 
     let walk_sink = Sink::try_new(&stream_handle).unwrap();
 
-    let mut volume = 0.0;
+    let mut volume = 0.5;
     music_sink.set_volume(volume);
-    walk_sink.set_volume(0.0);
+    walk_sink.set_volume(0.5);
 
     music_sink.play();
 
