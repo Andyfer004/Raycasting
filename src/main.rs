@@ -119,14 +119,19 @@ fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_
     let texture_height = wall_texture.height() as usize;
 
     for x in 0..framebuffer.width {
+        // Calcula el ángulo del rayo
         let camera_x = 2.0 * (x as f64) / (framebuffer.width as f64) - 1.0;
-        let angle_offset = player.fov / 2.0 * camera_x;
+        let ray_angle = player.direction + player.fov / 2.0 * camera_x;
 
-        // Obtener la distancia perpendicular y si la intersección es horizontal o vertical
-        let (perp_wall_dist, is_horizontal) = cast_ray(map, player, angle_offset);
+        // Dirección del rayo
+        let ray_dir_x = ray_angle.cos();
+        let ray_dir_y = ray_angle.sin();
+
+        // Lanza el rayo y obtiene la distancia perpendicular y si la intersección es horizontal o vertical
+        let (perp_wall_dist, is_horizontal) = cast_ray(map, player, player.fov / 2.0 * camera_x);
 
         if perp_wall_dist > 0.0 {
-            let wall_height = (framebuffer.height as f64 / perp_wall_dist) as usize;
+            let wall_height = (framebuffer.height as f64 / (perp_wall_dist + 0.1)) as usize;
             let wall_height = wall_height.min(framebuffer.height);
 
             let start = (framebuffer.height / 2).saturating_sub(wall_height / 2);
@@ -140,17 +145,17 @@ fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_
                 framebuffer.point(x, y, COLOR_SUELO);
             }
 
-            // Renderizar la textura correctamente
-            let mut wall_x = if is_horizontal {
-                player.x + perp_wall_dist * player.direction.cos()
+            // Calcular la posición del muro en la textura
+            let wall_x = if is_horizontal {
+                player.x + perp_wall_dist * ray_dir_x
             } else {
-                player.y + perp_wall_dist * player.direction.sin()
+                player.y + perp_wall_dist * ray_dir_y
             };
-            wall_x -= wall_x.floor();
-            let tex_x = (wall_x * texture_width as f64) as usize;
+            let wall_x = wall_x - wall_x.floor(); // Mantener solo la parte fraccionaria de la posición
 
+            let tex_x = (wall_x * texture_width as f64).min(texture_width as f64 - 1.0) as usize;
             for y in start..end {
-                let tex_y = (((y - start) * texture_height) / wall_height) % texture_height;
+                let tex_y = (((y - start) * texture_height) / wall_height).min(texture_height - 1);
                 let pixel = wall_texture.get_pixel(tex_x as u32, tex_y as u32);
                 let color = ((pixel[0] as u32) << 16) | ((pixel[1] as u32) << 8) | (pixel[2] as u32);
                 framebuffer.point(x, y, color);
@@ -158,6 +163,7 @@ fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_
         }
     }
 }
+
 
 
 
@@ -253,7 +259,7 @@ fn main() {
 
     let mut framebuffer = Framebuffer::new(WIDTH, HEIGHT);
     let mut window = Window::new(
-        "3D Raycaster",
+        "3D Raycaster Press enter for continue",
         window_width,
         window_height,
         WindowOptions::default(),
@@ -279,7 +285,6 @@ fn main() {
                 const COLOR_FONDO: u32 = 0x000000;
                 framebuffer.buffer.fill(COLOR_FONDO);
                 draw_centered_text(&mut framebuffer, "WELCOME", 0xFFFFFF, 3);
-                draw_centered_text(&mut framebuffer, "Press ENTER to start", 0xFFFFFF, 2);
                 window.update_with_buffer(&framebuffer.buffer, WIDTH, HEIGHT).unwrap();
 
                 if window.is_key_down(Key::Enter) {
