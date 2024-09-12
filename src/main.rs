@@ -114,20 +114,17 @@ fn draw_fps(framebuffer: &mut Framebuffer, fps: usize) {
     draw_text(framebuffer, WIDTH - 70, 10, &format!("{}FPS", fps), 0xFFFFFF, 1);
 }
 
-fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_texture: &image::DynamicImage) {
+fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_texture: &image::DynamicImage, key: &Item, goal: &Item) {
     let texture_width = wall_texture.width() as usize;
     let texture_height = wall_texture.height() as usize;
 
     for x in 0..framebuffer.width {
-        // Calcula el ángulo del rayo
         let camera_x = 2.0 * (x as f64) / (framebuffer.width as f64) - 1.0;
         let ray_angle = player.direction + player.fov / 2.0 * camera_x;
 
-        // Dirección del rayo
         let ray_dir_x = ray_angle.cos();
         let ray_dir_y = ray_angle.sin();
 
-        // Lanza el rayo y obtiene la distancia perpendicular y si la intersección es horizontal o vertical
         let (perp_wall_dist, is_horizontal) = cast_ray(map, player, player.fov / 2.0 * camera_x);
 
         if perp_wall_dist > 0.0 {
@@ -151,7 +148,7 @@ fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_
             } else {
                 player.y + perp_wall_dist * ray_dir_y
             };
-            let wall_x = wall_x - wall_x.floor(); // Mantener solo la parte fraccionaria de la posición
+            let wall_x = wall_x - wall_x.floor(); 
 
             let tex_x = (wall_x * texture_width as f64).min(texture_width as f64 - 1.0) as usize;
             for y in start..end {
@@ -162,7 +159,56 @@ fn render_scene(map: &Map, player: &Player, framebuffer: &mut Framebuffer, wall_
             }
         }
     }
+
+    // Dibuja la llave si no ha sido recogida
+    if !key.collected {
+        draw_sprite(framebuffer, key.x, key.y, player, 0xFFFF00); // Color amarillo
+    }
+
+    // Dibuja la meta
+    draw_sprite(framebuffer, goal.x, goal.y, player, 0x00FF00); // Color verde
 }
+
+// Función auxiliar para dibujar sprites o rectángulos
+fn draw_sprite(framebuffer: &mut Framebuffer, item_x: f64, item_y: f64, player: &Player, color: u32) {
+    let sprite_dist_x = item_x - player.x;
+    let sprite_dist_y = item_y - player.y;
+
+    // Calcular la proyección del sprite en la pantalla usando coseno y seno del ángulo de dirección
+    let inv_det = 1.0 / (player.plane_x * player.direction.sin() - player.direction.cos() * player.plane_y);
+
+    let transform_x = inv_det * (player.direction.sin() * sprite_dist_x - player.direction.cos() * sprite_dist_y);
+    let mut transform_y = inv_det * (-player.plane_y * sprite_dist_x + player.plane_x * sprite_dist_y);
+
+    // Evitar divisiones por cero o valores muy pequeños
+    if transform_y.abs() < f64::EPSILON {
+        transform_y = f64::EPSILON;
+    }
+
+    let sprite_screen_x = ((framebuffer.width as f64 / 2.0) * (1.0 + transform_x / transform_y)) as isize;
+
+    // Tamaño y posición del sprite
+    let sprite_height = (framebuffer.height as f64 / transform_y) as isize;
+    let sprite_width = sprite_height;
+
+    // Calcular inicio y fin de dibujo, asegurando que no haya desbordamientos
+    let draw_start_y = (framebuffer.height as isize / 2 - sprite_height / 2).max(0);
+    let draw_start_x = sprite_screen_x.saturating_sub(sprite_width / 2).max(0) as usize;
+    let draw_end_x = draw_start_x.saturating_add(sprite_width as usize).min(framebuffer.width);
+    let draw_end_y = (draw_start_y + sprite_height).min(framebuffer.height as isize);
+
+    // Dibujar el rectángulo del sprite, evitando fuera de rango
+    for x in draw_start_x..draw_end_x {
+        for y in draw_start_y..draw_end_y {
+            if x < framebuffer.width && (y as usize) < framebuffer.height {
+                framebuffer.point(x, y as usize, color);
+            }
+        }
+    }
+}
+
+
+
 
 
 
@@ -211,6 +257,8 @@ fn draw_minimap(map: &Map, player: &Player, framebuffer: &mut Framebuffer, key: 
             framebuffer.point(goal_x + px, goal_y + py, 0x00FF00);
         }
     }
+
+    
 }
 
 fn generate_random_position(map: &Map) -> (f64, f64) {
@@ -334,7 +382,8 @@ fn main() {
                     game_state = GameState::WinScreen;
                 }
 
-                render_scene(&map, &player, &mut framebuffer, &wall_texture);
+                render_scene(&map, &player, &mut framebuffer, &wall_texture, &key, &goal);
+
                 draw_minimap(&map, &player, &mut framebuffer, &key, &goal);
 
                 frame_count += 1;

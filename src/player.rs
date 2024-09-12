@@ -6,17 +6,24 @@ use crate::map::Map;
 pub struct Player {
     pub x: f64,
     pub y: f64,
-    pub direction: f64, // En radianes
-    pub fov: f64, // Campo de visión en radianes
+    pub direction: f64, // Ángulo de dirección del jugador
+    pub fov: f64,       // Campo de visión
+    pub plane_x: f64,   // Plano de la cámara en el eje X
+    pub plane_y: f64,   // Plano de la cámara en el eje Y
 }
 
 impl Player {
-    pub fn new(x: f64, y: f64, direction: f64) -> Self {
-        Self {
+    pub fn new(x: f64, y: f64, direction: f64) -> Player {
+        let fov = 66.0_f64.to_radians(); // Establecer un campo de visión
+        let plane_x = -direction.sin() * fov / 2.0; // Plano en X
+        let plane_y = direction.cos() * fov / 2.0;  // Plano en Y
+        Player {
             x,
             y,
             direction,
-            fov: 60.0_f64.to_radians(), // FOV predeterminado de 60 grados
+            fov,
+            plane_x,
+            plane_y,
         }
     }
 
